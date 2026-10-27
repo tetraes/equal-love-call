@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コール練習</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@700&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="top"><div class="wrap">
+  <div class="head"><a href="index.html">← 曲一覧</a><h1 id="title"></h1></div>
+  <div class="video"><div id="player">YouTubeのURLを入れて「読み込む」</div></div>
+  <div class="count" id="count">
+    <div class="num" id="num">--<small>秒</small></div>
+    <div><div class="l">次のコールまで</div><div class="nx" id="nx">-</div></div>
+  </div>
+</div></div>
+
+<main class="wrap">
+  <div class="bar">
+    <input type="text" id="url" placeholder="YouTubeのURL" aria-label="YouTubeのURL">
+    <button id="load">読み込む</button>
+  </div>
+  <div class="bar seek">
+    <input type="text" id="sec" placeholder="1:23 or 83" aria-label="ジャンプ先の秒数" inputmode="decimal">
+    <button id="go">ジャンプ</button>
+    <button data-d="-5">-5秒</button>
+    <button data-d="5">+5秒</button>
+    <select id="rate" aria-label="再生速度"><option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option></select>
+  </div>
+  <ul id="lines"></ul>
+  <details>
+    <summary>歌詞・コールを編集する</summary>
+    <p>1行に「秒数|歌詞|コール」。コールがない行は最後を空に。「#」で始まる行はメモ。この端末のブラウザに保存されます（全員に公開するなら songs.js に書いてね）。</p>
+    <textarea id="data" spellcheck="false" aria-label="歌詞データ"></textarea>
+    <div class="bar"><button id="apply">反映する</button></div>
+  </details>
+  <nav class="pn" id="pn"></nav>
+</main>
+
+<script src="songs.js"></script>
+<script>
+var $ = function(s){return document.querySelector(s)};
+var id = new URLSearchParams(location.search).get("id"), idx = findIndex(id), song = ALL[idx];
+var player = null, data = [], items = [], lastCur = -2, pendingId = null;
+function store(k, v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k, v); }catch(e){ return null; } }
+function parseTime(s){ s = String(s).trim(); if(s.indexOf(":")>-1) return s.split(":").map(Number).reduce(function(a,b){return a*60+b},0); return parseFloat(s); }
+function fmt(t){ var m = Math.floor(t/60), s = Math.floor(t%60); return m + ":" + (s<10?"0":"") + s; }
+function parseData(txt){
+  return txt.split("\n").map(function(l){return l.trim()}).filter(function(l){return l && l[0] !== "#"})
+    .map(function(l){ var p = l.split("|"); return {t:parseTime(p[0]), lyric:(p[1]||"").trim(), call:(p[2]||"").trim()}; })
+    .filter(function(x){return !isNaN(x.t)}).sort(function(a,b){return a.t-b.t});
+}
+function render(){
+  var ul = $("#lines"); ul.innerHTML = ""; items = []; lastCur = -2;
+  if(!data.length){ ul.innerHTML = '<li class="empty">この曲の歌詞・コールはまだ入っていません。下の「編集する」から追加できます。</li>'; return; }
+  data.forEach(function(d){
+    var li = document.createElement("li"), b = document.createElement("button");
+    b.innerHTML = '<span class="t"></span><span><span class="ly"></span><span class="c"></span></span>';
+    b.querySelector(".t").textContent = fmt(d.t); b.querySelector(".ly").textContent = d.lyric; b.querySelector(".c").textContent = d.call;
+    b.onclick = function(){ seek(d.t); }; li.appendChild(b); ul.appendChild(li); items.push(li);
+  });
+}
+function videoId(s){ var m = s.match(/(?:v=|youtu\.be\/|embed\/|shorts\/|live\/)([\w-]{11})/); if(m) return m[1]; return /^[\w-]{11}$/.test(s.trim()) ? s.trim() : null; }
+function loadVideo(v){
+  if(!v){ alert("YouTubeのURLを確認してください"); return; }
+  store("call-video-"+id, v);
+  if(player && player.loadVideoById){ player.loadVideoById(v); return; }
+  pendingId = v; if(window.YT && YT.Player) makePlayer();
+}
+function makePlayer(){ $(".video").innerHTML = '<div id="player"></div>'; player = new YT.Player("player", {videoId: pendingId, playerVars:{playsinline:1, rel:0}}); }
+window.onYouTubeIframeAPIReady = function(){ if(pendingId) makePlayer(); };
+function ok(){ return player && player.getCurrentTime; }
+function seek(t){ if(ok()){ player.seekTo(Math.max(0,t), true); player.playVideo(); } }
+function tick(){
+  if(!ok()) return;
+  var cur = player.getCurrentTime(), rate = player.getPlaybackRate ? player.getPlaybackRate() : 1, ci = -1, nx = null, i;
+  for(i=0;i<data.length;i++){ if(data[i].t <= cur) ci = i; }
+  for(i=0;i<data.length;i++){ if(data[i].call && data[i].t > cur){ nx = data[i]; break; } }
+  if(ci !== lastCur){
+    items.forEach(function(li,j){ li.classList.toggle("cur", j===ci); });
+    if(items[ci]) items[ci].scrollIntoView({block:"center", behavior: matchMedia("(prefers-reduced-motion:reduce)").matches ? "auto" : "smooth"});
+    lastCur = ci;
+  }
+  if(nx){ var left = (nx.t - cur)/rate; $("#num").innerHTML = left.toFixed(1) + "<small>秒</small>"; $("#nx").textContent = nx.call; $("#count").classList.toggle("soon", left <= 3); }
+  else { $("#num").innerHTML = "--<small>秒</small>"; $("#nx").textContent = "（この先のコールなし）"; $("#count").classList.remove("soon"); }
+}
+setInterval(tick, 100);
+
+if(!song){
+  $("#title").textContent = "曲が見つかりません";
+  document.querySelector("main").innerHTML = '<p class="empty"><a href="index.html">曲一覧に戻る</a></p>';
+} else {
+  var sd = SONG_DATA[id] || {};
+  $("#title").textContent = song.title; document.title = song.title + " | コール練習";
+  var txt = store("call-data-"+id) || sd.lines || "";
+  $("#data").value = txt; data = parseData(txt); render();
+  var v = sd.video || store("call-video-"+id);
+  if(v){ $("#url").value = v; loadVideo(videoId(v)); }
+  var s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s);
+  var pn = $("#pn");
+  [[idx-1,"← "],[idx+1," →"]].forEach(function(p,k){
+    var t = ALL[p[0]], a = document.createElement(t ? "a" : "span");
+    if(t){ a.href = "song.html?id="+t.id; a.textContent = k ? t.title + p[1] : p[1] + t.title; }
+    pn.appendChild(a);
+  });
+}
+$("#load").onclick = function(){ loadVideo(videoId($("#url").value)); };
+$("#url").onkeydown = function(e){ if(e.key==="Enter") $("#load").click(); };
+$("#go").onclick = function(){ var t = parseTime($("#sec").value); if(!isNaN(t)) seek(t); };
+$("#sec").onkeydown = function(e){ if(e.key==="Enter") $("#go").click(); };
+document.querySelectorAll("[data-d]").forEach(function(b){ b.onclick = function(){ if(ok()) seek(player.getCurrentTime() + Number(b.dataset.d)); }; });
+$("#rate").onchange = function(){ if(ok()) player.setPlaybackRate(Number($("#rate").value)); };
+$("#apply").onclick = function(){ store("call-data-"+id, $("#data").value); data = parseData($("#data").value); render(); };
+</script>
+</body>
+</html>
